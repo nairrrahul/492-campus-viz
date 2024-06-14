@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Cal Poly Campus Ride</title>
+    <script src="https://api.mapbox.com/mapbox-gl-js/v2.8.1/mapbox-gl.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://unpkg.com/threebox-plugin/dist/threebox.min.js"></script>
+    <script src="config.js"></script>
+    <style>
+        body { 
+            margin: 0; 
+            padding: 0; 
+        }
+        #map { 
+            position: absolute;
+            top: 0; 
+            bottom: 0; 
+            width: 100%;
+        }
+        #menu {
+            position: absolute;
+            background: white;
+            padding: 10px;
+            border-radius: 5px;
+            outline: 2px solid rgba(0,0,0,0.3);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .mapboxgl-popup-content {
+            font-size: 9px;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding: 2px;
+            border: 1.5px solid rgba(0,0,0,0.5);
+        }
+        .checking {
+            background: white;
+            font-size: 9px;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding: 2px;
+            border: 1.5px solid rgba(0,0,0,0.5);
+            width:100px;
+            position: absolute;
+        }
+        #time {
+            background: white;
+            font-size: 14px;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding: 2px;
+            border: 1.5px solid rgba(0,0,0,0.5);
+            width:180px;
+            position: absolute;
+        }
+    </style>
+    <link href="https://api.mapbox.com/mapbox-gl-js/v2.8.1/mapbox-gl.css" rel="stylesheet" />
+</head>
+<body>
+<div id="map"></div>
+<div id="menu" style="margin-left:10px; margin-top:10px;">
+    <input id="streets-v11" type="radio" name="rtoggle" value="streets" checked="checked" />
+    <label for="streets-v11">Street</label>
+    <input id="light-v10" type="radio" name="rtoggle" value="light" />
+    <label for="light-v10">Light Mode</label>
+    <input id="dark-v10" type="radio" name="rtoggle" value="dark" />
+    <label for="dark-v10">Dark Mode</label>
+    <input id="satellite-v9" type="radio" name="rtoggle" value="outdoors" />
+    <label for="satellite-v9">Satellite</label>
+</div>
+<div id="passive-mode" class="checking" style="margin-left:10px; margin-top:60px;">
+    <input id="passive-mode-checkbox" type="checkbox" name="ptoggle" value="passive" />
+    <label for="passive-mode-checkbox">Passive Mode</label>
+</div>
+<div id="lighting-mode" class="checking" style="margin-left:10px; margin-top:90px;">
+    <input id="lighting-checkbox" type="checkbox" name="ptoggle" value="passive" />
+    <label for="lighting-checkbox">Enable Real-Time Lighting</label>
+</div>
+<div id="time" style="margin-left:125px; margin-top:60px;">taga</div>
+<script>
+    mapboxgl.accessToken = config.accessToken;
+
+    let mapConfig = {
+        ALL: { center: [-120.6596, 35.3004], zoom: 16.25, pitch: 45, bearing: 0 },
+        names: {
+            compositeSource: "composite",
+            compositeSourceLayer: "building",
+            compositeLayer: "3d-buildings"
+        },
+        drone: {
+            origin: [-120.66476589769961, 35.29613619186038, 55],
+            type: 'glb',
+            model: './drone.glb',
+            rotation: {x: 90, y: 90, z: 0},
+            scale: 15,
+            startRotation: {x: 0, y: 0, z: 0}
+        }
+    };
+    let minZoom = 12;
+    let buildingHover = null;
+
+    var map = new mapboxgl.Map({
+        style: 'mapbox://styles/mapbox/outdoors-v11',
+        center: mapConfig.ALL.center,
+        zoom: mapConfig.ALL.zoom,
+        pitch: mapConfig.ALL.pitch,
+        bearing: mapConfig.ALL.bearing,
+        container: 'map',
+        antialias: true,
+        hash: true
+    });
+    map.addControl(new mapboxgl.NavigationControl());
+
+    window.tb = new Threebox(
+        map,
+        map.getCanvas().getContext('webgl'),
+        { 
+            defaultLights: true,
+            sky: true,
+            terrain: document.getElementById('passive-mode-checkbox').checked,
+            realSunlight: document.getElementById('lighting-checkbox').checked
+        }
+    );
+
+    const popup = new mapboxgl.Popup({
+        closeButton: false,
+        closeOnClick: false
+    });
+
+    let layerId = "streets-v11";
+    function switchLayer(layer) {
+        if (layerId != layer.target.id) {
+            layerId = layer.target.id;
+            tb.setStyle('mapbox://styles/mapbox/' + layerId);
+        }
+    }
+
+    let styleList = document.getElementById('menu');
+    let inputs = styleList.getElementsByTagName('input');
+    for (let i = 0; i < inputs.length; i++) {
+        inputs[i].onclick = switchLayer;
+    }
+
+    let drone;
+
+    function createDroneLayer(name) {
+        let cubeLayer = {
+            'id': 'drone',
+            'type': 'custom',
+            'renderingMode': '3d',
+            'onAdd': (map, mbxContext) => {
+                let options = {
+                    type: mapConfig.drone.type,
+                    obj: mapConfig.drone.model,
+                    scale: mapConfig.drone.scale,
+                    units: 'meters',
+                    anchor: 'bottom',
+                    rotation: mapConfig.drone.rotation
+                };
+
+                tb.loadObj(options, (model) => {
+                    drone = model.setCoords(mapConfig.drone.origin);
+                    drone.setRotation(mapConfig.drone.startRotation);
+                    tb.add(drone);
+                    initRectMovement();
+                    console.log(model);
+                },
+                (err) => {
+                    console.log(err);
+                });
+            },
+            'render': function (gl, matrix) {
+						tb.update();
+			}
+        };
+
+        return cubeLayer;
+    }
+
+    function easing(t) {
+		return t * (2 - t);
+	}
+
+    let velocity = 0.0, speed = 0.0, ds = 0.01;
+    let keys;
+    let prefs = {
+        acceleration: 2,
+        inertia: 1
+    };
+
+    map.on('style.load', () => {
+        map.addSource('buildings', {
+            'type': 'geojson',
+            'data': 'calpoly_buildings.geojson',
+            'promoteId': 'osmid'
+        });
+
+        map.addSource('trees', {
+            'type': 'geojson',
+            'data': 'trees.json'
+        });
+
+        map.addLayer({
+            'id': 'building-extrusion',
+            'type': 'fill-extrusion',
+            'source': 'buildings',
+            'paint': {
+                'fill-extrusion-color': [
+                    'case',
+                    ['boolean', ['feature-state', 'hover'], false],
+                    'lightblue',
+                    'grey'
+                ],
+                'fill-extrusion-height': [
+						'interpolate',
+						['linear'],
+						['zoom'],
+						minZoom,
+						0,
+						minZoom + 0.05,
+						[
+                            'case',
+                            ['>', ['to-number', ['get', 'height']], 1],
+                            ['*', ['to-number', ['get', 'height']], 10],
+                            10
+                        ]
+					],
+					'fill-extrusion-base': [
+						'interpolate',
+						['linear'],
+						['zoom'],
+						minZoom,
+						0,
+						minZoom + 0.05,
+						0
+					],
+                'fill-extrusion-opacity': 1
+            }
+        });
+
+        //commented out but kept for posterity's sake
+
+        // map.addLayer({
+        //     'id': 'trees-render',
+        //     'type': 'fill-extrusion',
+        //     'source': 'trees',
+        //     'paint': {
+        //         'fill-extrusion-color': '#00f',
+        //         'fill-extrusion-height': [
+        //             'case',
+        //             ['>', ['get', 'exact_heig'], 1],
+        //             ['get', 'exact_heig'],
+        //             1
+        //         ],
+        //         'fill-extrusion-base': 0,
+        //         'fill-extrusion-opacity': 0.9
+        //     }
+        // });
+
+        map.addLayer({
+            'id': 'trees-render',
+            'type': 'circle',
+            'source': 'trees',
+            'paint': {
+                'circle-radius':
+                [
+                    'case',
+                    ['>', ['get', 'exact_heig'], 1],
+                    ['*', 0.5, ['get', 'exact_heig']],
+                    1
+                ],
+                'circle-color': 'green',
+                'circle-opacity': .3
+            }
+        });
+        
+        map.addLayer(createDroneLayer('cube'));
+        
+        map.on('sourcedata', (e) => {
+            if (e.sourceId !== 'trees-render') return
+            if (e.sourceLoaded !== true) return
+
+            mockData = {
+                "type": "FeatureCollection",
+                "features": []
+            };
+
+            map.querySourceFeatures('data')
+        });
+
+        map.moveLayer('building-extrusion');
+
+        map.on('click', (e) => {
+            console.log(e.lngLat);
+            console.log(e.lngLat.wrap());
+        });
+
+        map.on('mousemove', 'building-extrusion', (e) => {
+            if (e.features.length > 0) {
+                if (buildingHover !== null) {
+                    map.setFeatureState(
+                        { source: 'buildings', id: buildingHover },
+                        { hover: false }
+                    );
+                }
+                buildingHover = e.features[0].properties.osmid;
+                map.setFeatureState(
+                    { source: 'buildings', id: buildingHover },
+                    { hover: true }
+                );
+
+                const coords = e.features[0].geometry.coordinates[0];
+                const coordLen = coords.length;
+                lats = coords.reduce((a,b) => a + b[0], 0) / coordLen;
+                longs = coords.reduce((a,b) => a + b[1], 0) / coordLen;
+                const desc = e.features[0].properties.name;
+
+                popup.setLngLat([lats, longs]).setHTML(desc).addTo(map);
+            }
+            
+        });
+
+        map.on('mouseleave', 'building-extrusion', () => {
+            if (buildingHover !== null) {
+                map.setFeatureState(
+                    { source: 'buildings', id: buildingHover },
+                    { hover: false }
+                );
+            }
+            buildingHover = null;
+            popup.remove();
+        });
+
+        map.on('render', () => {tb.update();})
+        map.getCanvas().focus();
+    });
+
+    function initRectMovement() {
+        keys = {
+            a: false,
+            d: false,
+            w: false,
+            s: false,
+            z: false,
+            x: false
+        };
+
+        document.body.addEventListener('keydown', function (e) {
+            const key = e.code.replace('Key', '').toLowerCase();
+            if (keys[key] !== undefined)
+                keys[key] = true;
+        });
+
+        document.body.addEventListener('keyup', function (e) {
+            const key = e.code.replace('Key', '').toLowerCase();
+            if (keys[key] !== undefined)
+                keys[key] = false;
+            });
+
+        if (!document.getElementById('passive-mode-checkbox').checked) {
+            moveRect();
+        }
+        
+    }
+    
+    //movement code courtesy of threebox's examples/20-game.html
+    function moveRect() {
+        requestAnimationFrame(moveRect);
+        speed = 0.0;
+
+        if (!(keys.w || keys.s)) {
+            if (velocity > 0) { speed = -prefs.inertia * ds }
+            else if (velocity < 0) { speed = prefs.inertia * ds }
+            if (velocity > -0.0008 && velocity < 0.0008) { speed = velocity = 0.0; }
+        } 
+
+        if (keys.w)
+            speed = -prefs.acceleration * ds;
+        else if (keys.s)
+            speed = prefs.acceleration * ds;
+
+        velocity += (speed - velocity) * prefs.acceleration * ds;
+        if (speed == 0.0) {
+            velocity = 0;
+            return;
+        }
+
+        let zSpeed = 0;
+        if (keys.z)
+            zSpeed = -0.01;
+        else if (keys.x)
+            zSpeed = 0.01;
+
+        drone.set({ worldTranslate: new THREE.Vector3(0, velocity, zSpeed) });
+
+        let options = {
+            center: drone.coordinates,
+            bearing: map.getBearing(),
+            easing: easing
+        };
+
+        function toDeg(rad) {
+            return rad / Math.PI * 180;
+        }
+
+        function toRad(deg) {
+            return deg * Math.PI / 180;
+        }
+
+        let deg = 1;
+        let rad = toRad(deg);
+        let zAxis = new THREE.Vector3(0, 0, 1);
+
+        if (keys.a || keys.d) {
+            rad *= (keys.d ? -1 : 1);
+            drone.set({ quaternion: [zAxis, drone.rotation.z + rad] });
+            options.bearing = -toDeg(drone.rotation.z);
+        }
+
+        map.jumpTo(options);
+        tb.map.update = true;
+    }
+
+    document.getElementById('passive-mode-checkbox').onclick = () => {
+        setTimeout(() => {
+            window.location.reload();
+        }, 1500);
+    }
+
+    document.getElementById('lighting-checkbox').onclick = () => {
+        setTimeout(() => {
+            window.location.reload();
+        }, 1500);
+    }
+
+    function updateTime() {
+        const now = new Date();
+        const timeString = now.toLocaleTimeString();
+        document.getElementById('time').textContent = "Current Time: " + timeString;
+    }
+    setInterval(updateTime, 1000);
+    updateTime();
+
+</script>
+</body>
+</html>
