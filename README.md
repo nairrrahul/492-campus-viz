@@ -90,3 +90,7 @@ This also meant that adding actual tree models, which was initially in scope of 
 2) Create a script to modify the JSON to change the feature type to `Polygon` and add a `Geometry` section with 4 points, all +/- `0.00014` from the center stated in the point. Further modifications would have to be made to add/remove features present in Polygon geometries but not in Point ones. This runs the likely risk of creating a deformed geojson file, which would be tedious to debug.
 
 As it wouldn't make sense for one mode to have 3D trees and the other to not have them, a compromise was devised where trees would be represented as circles of varying size based on their height. While it does envelop the campus when zoomed out, the purpose of the application is to provide a close up view of Cal Poly's campus.
+
+### Passive Mode
+
+Passive mode was added due to the aforementioned limitations. 3D models render at application initialization, but quickly disappear once all extrusions are rendered. Hence, terrain needed to be removed in order to allow the user to move around with the drone on Cal Poly campus.
